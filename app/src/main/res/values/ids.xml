@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="action_send_message" type="id" />
+    <item name="action_view_details" type="id" />
+    <item name="action_view_call_history" type="id" />
+    <item name="action_add_to_favorite" type="id" />
+    <item name="action_remove_from_favorite" type="id" />
+    <item name="action_delete_from_log" type="id" />
+    <item name="action_clear_all" type="id" />
+    <item name="action_call_sim_1" type="id" />
+    <item name="action_call_sim_2" type="id" />
+    <item name="action_play_recording" type="id" />
+    <item name="action_share_recording" type="id" />
+    <item name="action_whatsapp_message" type="id" />
+    <item name="action_telegram_message" type="id" />
+</resources>

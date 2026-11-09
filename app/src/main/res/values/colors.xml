@@ -1,0 +1,11 @@
+<resources>
+    <color name="primary">#006494</color>
+    <color name="on_primary">#FFFFFF</color>
+    <color name="background">#FAFAFA</color>
+    <color name="on_background">#1A1A1A</color>
+    <color name="surface">#FFFFFF</color>
+    <color name="on_surface">#1A1A1A</color>
+    <color name="call_answer_green">#2E7D32</color>
+    <color name="call_decline_red">#C62828</color>
+    <color name="call_control_btn">#37474F</color>
+</resources>
