@@ -167,19 +167,30 @@ class CallLogAdapter(
                         )
                     }
 
-                    // Additional utility actions
-                    info.addAction(
-                        AccessibilityNodeInfoCompat.AccessibilityActionCompat(
-                            R.id.action_whatsapp_message,
-                            context.getString(R.string.action_whatsapp_message)
-                        )
+                    // Social messaging actions - only show if registered account exists
+                    val social = SocialMessenger.checkSocialAvailability(
+                        context = context,
+                        contactId = contactLookup?.contactId,
+                        rawNumber = item.number
                     )
-                    info.addAction(
-                        AccessibilityNodeInfoCompat.AccessibilityActionCompat(
-                            R.id.action_telegram_message,
-                            context.getString(R.string.action_telegram_message)
+
+                    if (social.hasWhatsApp) {
+                        info.addAction(
+                            AccessibilityNodeInfoCompat.AccessibilityActionCompat(
+                                R.id.action_whatsapp_message,
+                                context.getString(R.string.action_whatsapp_message)
+                            )
                         )
-                    )
+                    }
+
+                    if (social.hasTelegram) {
+                        info.addAction(
+                            AccessibilityNodeInfoCompat.AccessibilityActionCompat(
+                                R.id.action_telegram_message,
+                                context.getString(R.string.action_telegram_message)
+                            )
+                        )
+                    }
                     info.addAction(
                         AccessibilityNodeInfoCompat.AccessibilityActionCompat(
                             R.id.action_send_message,

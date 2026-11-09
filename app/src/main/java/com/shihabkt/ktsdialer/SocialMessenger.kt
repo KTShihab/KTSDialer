@@ -1,16 +1,21 @@
 package com.shihabkt.ktsdialer
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.provider.ContactsContract
+import android.util.LruCache
 import android.widget.Toast
+import androidx.core.content.ContextCompat
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 
 /**
  * Utility for launching direct messaging in WhatsApp and multi-client Telegram.
- * Supports selecting between multiple installed Telegram clients (BlindGram, Nekogram, Telegram, etc.).
+ * Supports selecting between multiple installed Telegram clients (BlindGram, Nekogram, Telegram, etc.)
+ * and checking whether a contact or phone number has an active account on WhatsApp or Telegram.
  */
 object SocialMessenger {
 
@@ -18,6 +23,218 @@ object SocialMessenger {
         val packageName: String,
         val appName: String
     )
+
+    data class SocialAvailability(
+        val hasWhatsApp: Boolean,
+        val hasTelegram: Boolean
+    )
+
+    // Cache of contact ID / phone number to social messaging availability
+    private val socialCache = LruCache<String, SocialAvailability>(500)
+
+    /**
+     * Clears the cached social availability status (e.g. when contacts change).
+     */
+    fun clearCache() {
+        synchronized(socialCache) {
+            socialCache.evictAll()
+        }
+    }
+
+    /**
+     * Checks whether WhatsApp is installed on the device.
+     */
+    fun isWhatsAppInstalled(context: Context): Boolean {
+        val pm = context.packageManager
+        return try {
+            pm.getPackageInfo("com.whatsapp", 0)
+            true
+        } catch (_: Exception) {
+            try {
+                pm.getPackageInfo("com.whatsapp.w4b", 0)
+                true
+            } catch (_: Exception) {
+                false
+            }
+        }
+    }
+
+    /**
+     * Checks whether any Telegram client is installed on the device.
+     */
+    fun isTelegramInstalled(context: Context): Boolean {
+        return getInstalledTelegramClients(context).isNotEmpty()
+    }
+
+    /**
+     * Checks whether a contact or phone number has WhatsApp and/or Telegram registered in ContactsContract.
+     *
+     * @param context Context for querying ContentResolver.
+     * @param contactId Optional contact ID if already known.
+     * @param rawNumber Phone number string.
+     * @return SocialAvailability indicating whether WhatsApp and Telegram accounts exist for this number.
+     */
+    fun checkSocialAvailability(
+        context: Context,
+        contactId: Long?,
+        rawNumber: String
+    ): SocialAvailability {
+        val checkWhatsApp = isWhatsAppInstalled(context)
+        val checkTelegram = isTelegramInstalled(context)
+
+        // If neither app is installed on the phone, neither can be used
+        if (!checkWhatsApp && !checkTelegram) {
+            return SocialAvailability(hasWhatsApp = false, hasTelegram = false)
+        }
+
+        if (ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.READ_CONTACTS
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            return SocialAvailability(hasWhatsApp = false, hasTelegram = false)
+        }
+
+        val digits = rawNumber.replace("[^0-9]".toRegex(), "")
+        val cacheKey = if (contactId != null && contactId > 0L) {
+            "id_${contactId}_$digits"
+        } else {
+            "num_$digits"
+        }
+
+        synchronized(socialCache) {
+            socialCache.get(cacheKey)?.let { return it }
+        }
+
+        var resolvedContactId = if (contactId != null && contactId > 0L) contactId else null
+        if (resolvedContactId == null && rawNumber.isNotBlank()) {
+            resolvedContactId = lookupContactIdByNumber(context, rawNumber)
+        }
+
+        var whatsAppFound = false
+        var telegramFound = false
+
+        if (resolvedContactId != null && resolvedContactId > 0L) {
+            val contactIdStr = resolvedContactId.toString()
+
+            // 1. Query RawContacts for account_type
+            try {
+                val rawUri = ContactsContract.RawContacts.CONTENT_URI
+                val rawProj = arrayOf(ContactsContract.RawContacts.ACCOUNT_TYPE)
+                val rawSel = "${ContactsContract.RawContacts.CONTACT_ID} = ?"
+                val rawArgs = arrayOf(contactIdStr)
+
+                context.contentResolver.query(rawUri, rawProj, rawSel, rawArgs, null)?.use { cursor ->
+                    val accIdx = cursor.getColumnIndex(ContactsContract.RawContacts.ACCOUNT_TYPE)
+                    while (cursor.moveToNext()) {
+                        val accType = if (accIdx != -1) cursor.getString(accIdx)?.lowercase().orEmpty() else ""
+                        if (checkWhatsApp && !whatsAppFound && accType.contains("whatsapp")) {
+                            whatsAppFound = true
+                        }
+                        if (checkTelegram && !telegramFound && isTelegramIdentifier(accType)) {
+                            telegramFound = true
+                        }
+                        if (whatsAppFound && telegramFound) break
+                    }
+                }
+            } catch (_: Exception) {}
+
+            // 2. Query Data for mimetype if either is still not found
+            if ((checkWhatsApp && !whatsAppFound) || (checkTelegram && !telegramFound)) {
+                try {
+                    val dataUri = ContactsContract.Data.CONTENT_URI
+                    val dataProj = arrayOf(ContactsContract.Data.MIMETYPE)
+                    val dataSel = "${ContactsContract.Data.CONTACT_ID} = ?"
+                    val dataArgs = arrayOf(contactIdStr)
+
+                    context.contentResolver.query(dataUri, dataProj, dataSel, dataArgs, null)?.use { cursor ->
+                        val mimeIdx = cursor.getColumnIndex(ContactsContract.Data.MIMETYPE)
+                        while (cursor.moveToNext()) {
+                            val mime = if (mimeIdx != -1) cursor.getString(mimeIdx)?.lowercase().orEmpty() else ""
+                            if (checkWhatsApp && !whatsAppFound && mime.contains("whatsapp")) {
+                                whatsAppFound = true
+                            }
+                            if (checkTelegram && !telegramFound && isTelegramIdentifier(mime)) {
+                                telegramFound = true
+                            }
+                            if (whatsAppFound && telegramFound) break
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+
+        // 3. Fallback: Query Data directly by phone number suffix if contactId lookup yielded nothing
+        if ((checkWhatsApp && !whatsAppFound) || (checkTelegram && !telegramFound)) {
+            if (digits.length >= 7) {
+                val searchSuffix = if (digits.length > 10) digits.takeLast(10) else digits
+                try {
+                    val dataUri = ContactsContract.Data.CONTENT_URI
+                    val dataProj = arrayOf(ContactsContract.Data.MIMETYPE)
+                    val dataSel = "${ContactsContract.Data.DATA1} LIKE ?"
+                    val dataArgs = arrayOf("%$searchSuffix%")
+
+                    context.contentResolver.query(dataUri, dataProj, dataSel, dataArgs, null)?.use { cursor ->
+                        val mimeIdx = cursor.getColumnIndex(ContactsContract.Data.MIMETYPE)
+                        while (cursor.moveToNext()) {
+                            val mime = if (mimeIdx != -1) cursor.getString(mimeIdx)?.lowercase().orEmpty() else ""
+                            if (checkWhatsApp && !whatsAppFound && mime.contains("whatsapp")) {
+                                whatsAppFound = true
+                            }
+                            if (checkTelegram && !telegramFound && isTelegramIdentifier(mime)) {
+                                telegramFound = true
+                            }
+                            if (whatsAppFound && telegramFound) break
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+
+        val result = SocialAvailability(
+            hasWhatsApp = checkWhatsApp && whatsAppFound,
+            hasTelegram = checkTelegram && telegramFound
+        )
+
+        synchronized(socialCache) {
+            socialCache.put(cacheKey, result)
+            if (resolvedContactId != null && resolvedContactId > 0L) {
+                socialCache.put("id_$resolvedContactId", result)
+            }
+            if (digits.isNotBlank()) {
+                socialCache.put("num_$digits", result)
+            }
+        }
+
+        return result
+    }
+
+    private fun lookupContactIdByNumber(context: Context, rawNumber: String): Long? {
+        return try {
+            val uri = Uri.withAppendedPath(
+                ContactsContract.PhoneLookup.CONTENT_FILTER_URI,
+                Uri.encode(rawNumber)
+            )
+            val projection = arrayOf(ContactsContract.PhoneLookup._ID)
+            context.contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val idx = cursor.getColumnIndex(ContactsContract.PhoneLookup._ID)
+                    if (idx != -1) cursor.getLong(idx) else null
+                } else null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun isTelegramIdentifier(value: String): Boolean {
+        val lower = value.lowercase()
+        return lower.contains("telegram") ||
+            lower.contains("nekogram") ||
+            lower.contains("blindgram") ||
+            lower.contains("challegram") ||
+            lower.contains("neko")
+    }
 
     /**
      * Formats the phone number for WhatsApp with country code (defaults to India 91 for 10-digit numbers).

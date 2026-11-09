@@ -100,21 +100,32 @@ class ContactAdapter(
                         )
                     )
 
-                    // Custom action: 'Message on WhatsApp'
-                    info.addAction(
-                        AccessibilityNodeInfoCompat.AccessibilityActionCompat(
-                            R.id.action_whatsapp_message,
-                            context.getString(R.string.action_whatsapp_message)
-                        )
+                    // Social messaging actions - only show if registered account exists
+                    val social = SocialMessenger.checkSocialAvailability(
+                        context = context,
+                        contactId = item.contactId,
+                        rawNumber = item.number
                     )
 
-                    // Custom action: 'Message on Telegram'
-                    info.addAction(
-                        AccessibilityNodeInfoCompat.AccessibilityActionCompat(
-                            R.id.action_telegram_message,
-                            context.getString(R.string.action_telegram_message)
+                    // Custom action: 'Message on WhatsApp'
+                    if (social.hasWhatsApp) {
+                        info.addAction(
+                            AccessibilityNodeInfoCompat.AccessibilityActionCompat(
+                                R.id.action_whatsapp_message,
+                                context.getString(R.string.action_whatsapp_message)
+                            )
                         )
-                    )
+                    }
+
+                    // Custom action: 'Message on Telegram'
+                    if (social.hasTelegram) {
+                        info.addAction(
+                            AccessibilityNodeInfoCompat.AccessibilityActionCompat(
+                                R.id.action_telegram_message,
+                                context.getString(R.string.action_telegram_message)
+                            )
+                        )
+                    }
 
                     // Custom action: 'Send Message'
                     info.addAction(

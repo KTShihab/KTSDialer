@@ -499,11 +499,20 @@ class DialFragment : Fragment() {
                 CallRecorder.shareRecording(context, recordings.first())
             }
         } else {
-            builder.setNeutralButton("WhatsApp") { _, _ ->
-                SocialMessenger.openWhatsApp(context, item.number)
+            val social = SocialMessenger.checkSocialAvailability(
+                context = context,
+                contactId = null,
+                rawNumber = item.number
+            )
+            if (social.hasWhatsApp) {
+                builder.setNeutralButton("WhatsApp") { _, _ ->
+                    SocialMessenger.openWhatsApp(context, item.number)
+                }
             }
-            builder.setNegativeButton("Telegram") { _, _ ->
-                SocialMessenger.openTelegram(context, item.number)
+            if (social.hasTelegram) {
+                builder.setNegativeButton("Telegram") { _, _ ->
+                    SocialMessenger.openTelegram(context, item.number)
+                }
             }
         }
 

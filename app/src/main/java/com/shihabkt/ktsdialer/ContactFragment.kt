@@ -112,6 +112,7 @@ class ContactFragment : Fragment() {
             override fun onChange(selfChange: Boolean, uri: Uri?) {
                 super.onChange(selfChange, uri)
                 Log.d(TAG, "Contacts change detected via ContentObserver: uri=$uri")
+                SocialMessenger.clearCache()
                 if (isAdded && hasReadContactsPermission()) {
                     fetchContacts()
                 }
@@ -324,17 +325,30 @@ class ContactFragment : Fragment() {
         val displayName = if (item.name.isNotBlank()) item.name else getString(R.string.unknown_caller)
         val starredStatus = if (item.isStarred) "Yes" else "No"
 
-        MaterialAlertDialogBuilder(requireContext())
+        val social = SocialMessenger.checkSocialAvailability(
+            context = requireContext(),
+            contactId = item.contactId,
+            rawNumber = item.number
+        )
+
+        val builder = MaterialAlertDialogBuilder(requireContext())
             .setTitle(R.string.dialog_contact_details_title)
             .setMessage("Name: $displayName\nNumber: ${item.number}\nStarred Favorite: $starredStatus")
             .setPositiveButton(R.string.dialog_close, null)
-            .setNeutralButton("WhatsApp") { _, _ ->
+
+        if (social.hasWhatsApp) {
+            builder.setNeutralButton("WhatsApp") { _, _ ->
                 SocialMessenger.openWhatsApp(requireContext(), item.number)
             }
-            .setNegativeButton("Telegram") { _, _ ->
+        }
+
+        if (social.hasTelegram) {
+            builder.setNegativeButton("Telegram") { _, _ ->
                 SocialMessenger.openTelegram(requireContext(), item.number)
             }
-            .create()
+        }
+
+        builder.create()
             .apply {
                 setOnShowListener {
                     window?.decorView?.sendAccessibilityEvent(
